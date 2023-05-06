@@ -1,0 +1,148 @@
+version: '3'
+services:
+  mysql-server-1:
+    image: mysql/mysql-server:8.0.12
+    ports:
+      - "3301:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=mysql
+      - MYSQL_ROOT_HOST=%
+    command:
+      [
+        "mysqld",
+        "--server_id=1",
+        "--binlog_checksum=NONE",
+        "--gtid_mode=ON",
+        "--enforce_gtid_consistency=ON",
+        "--log_bin",
+        "--log_slave_updates=ON",
+        "--master_info_repository=TABLE",
+        "--relay_log_info_repository=TABLE",
+        "--transaction_write_set_extraction=XXHASH64",
+        "--user=mysql",
+        "--skip-host-cache",
+        "--skip-name-resolve",
+        "--default_authentication_plugin=mysql_native_password",
+      ]
+    deploy: 
+      placement:
+        constraints: [node.labels.type == mysql-worker-3]
+    volumes:
+      - /mysql-data:/var/lib/mysql
+
+  mysql-server-2:
+    image: mysql/mysql-server:8.0.12
+    ports:
+      - "3302:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=mysql
+      - MYSQL_ROOT_HOST=%
+    command:
+      [
+        "mysqld",
+        "--server_id=2",
+        "--binlog_checksum=NONE",
+        "--gtid_mode=ON",
+        "--enforce_gtid_consistency=ON",
+        "--log_bin",
+        "--log_slave_updates=ON",
+        "--master_info_repository=TABLE",
+        "--relay_log_info_repository=TABLE",
+        "--transaction_write_set_extraction=XXHASH64",
+        "--user=mysql",
+        "--skip-host-cache",
+        "--skip-name-resolve",
+        "--default_authentication_plugin=mysql_native_password",
+        "--relay-log=mysql-server-2-relay-bin",
+      ]
+    deploy: 
+      placement:
+        constraints: [node.labels.type == mysql-worker-3]
+    volumes:
+      - /mysql-data:/var/lib/mysql
+
+  mysql-server-3:
+    image: mysql/mysql-server:8.0.12
+    ports:
+      - "3303:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=mysql
+      - MYSQL_ROOT_HOST=%
+    command:
+      [
+        "mysqld",
+        "--server_id=3",
+        "--binlog_checksum=NONE",
+        "--gtid_mode=ON",
+        "--enforce_gtid_consistency=ON",
+        "--log_bin",
+        "--log_slave_updates=ON",
+        "--master_info_repository=TABLE",
+        "--relay_log_info_repository=TABLE",
+        "--transaction_write_set_extraction=XXHASH64",
+        "--user=mysql",
+        "--skip-host-cache",
+        "--skip-name-resolve",
+        "--default_authentication_plugin=mysql_native_password",
+        "--relay-log=mysql-server-3-relay-bin",
+      ]
+    deploy: 
+      placement:
+        constraints: [node.labels.type == mysql-worker-3]
+    volumes:
+      - /mysql-data:/var/lib/mysql
+    
+
+  mysql-shell:
+    entrypoint: 
+      - MYSQL_USER=root
+      - MYSQL_HOST=mysql-server-1
+      - MYSQL_PORT=3306
+      - MYSQL_PASSWORD=mysql
+      - MYSQLSH_SCRIPT=/scripts/setupCluster.js
+      - MYSQL_SCRIPT=/scripts/db.sql
+    image: neumayer/mysql-shell-batch
+    volumes:
+      - ./scripts/:/scripts/
+    depends_on:
+      - mysql-server-1
+      - mysql-server-2
+      - mysql-server-3
+    deploy:
+      placement:
+        constraints: [node.labels.type == leader]
+
+
+  mysql-router:
+    environment:
+      - MYSQL_USER=root
+      - MYSQL_HOST=mysql-server-1
+      - MYSQL_PORT=3306
+      - MYSQL_PASSWORD=mysql
+      - MYSQL_INNODB_NUM_MEMBERS=3
+    image: mysql/mysql-router:8.0
+    ports:
+      - "6446:6446"
+    depends_on:
+      - mysql-server-1
+      - mysql-server-2
+      - mysql-server-3
+      - mysql-shell
+    restart: on-failure
+    deploy:
+      placement:
+        constraints: [node.labels.type == leader]
+
+
+  dbwebapp:
+    environment:
+      - DBUSER=dbwebapp
+      - DBPASS=dbwebapp
+      - DBNAME=dbwebappdb
+      - DBHOST=mysql-router
+      - DBPORT=6446
+    image: neumayer/dbwebapp
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mysql-router
